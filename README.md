@@ -1,219 +1,407 @@
 # 🔎 Autonomous AI Research Agent
 
-![Python](https://img.shields.io/badge/python-3.12-blue?logo=python&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-76%20passing-brightgreen)
-![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)
-![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?logo=streamlit&logoColor=white)
-![Agent](https://img.shields.io/badge/pattern-ReAct-9333EA)
+![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python\&logoColor=white)
+![Tests](https://img.shields.io/badge/Tests-76%20Passing-brightgreen)
+![Coverage](https://img.shields.io/badge/Coverage-100%25-brightgreen)
+![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?logo=streamlit\&logoColor=white)
+![Agent](https://img.shields.io/badge/Pattern-ReAct-9333EA)
 ![LLM](https://img.shields.io/badge/LLM-Claude%20API-8A63D2)
-![License](https://img.shields.io/badge/license-MIT-lightgrey)
+![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
-Give it a research question. It decides what to search, reads the pages
-worth reading, notices when it's going in circles, stops when it has
-enough — and writes a report where every claim is cited back to a real
-source it actually fetched.
+An autonomous AI research agent that receives a research question, determines what information it needs, searches for relevant sources, reads selected pages, handles failures and repeated actions, and produces a cited research report based on the sources it actually retrieved.
 
----
-
-## Table of Contents
-
-- [Why This Project](#why-this-project)
-- [What Makes This an *Agent*](#what-makes-this-an-agent)
-- [Three Guarantees Enforced in Python, Not in the Prompt](#three-guarantees-enforced-in-python-not-in-the-prompt)
-- [Architecture](#architecture)
-- [Environment Constraint — Stated Honestly](#environment-constraint--stated-honestly)
-- [Folder Structure](#folder-structure)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Real Demo Output](#real-demo-output)
-- [Testing](#testing)
-- [Deployment](#deployment)
-- [Version 2.0 Roadmap](#version-20-roadmap)
-- [GitHub Topics](#github-topics)
-- [Resume Bullet](#resume-bullet)
-- [Portfolio Description](#portfolio-description)
-- [LinkedIn Post Draft](#linkedin-post-draft)
+The system is built around a **ReAct (Reason + Act)** loop with control mechanisms implemented directly in Python for predictable execution, testing, and resource management.
 
 ---
 
-## Why This Project
+## Overview
 
-"Agent" is the most over-claimed word in AI right now. Most things
-labelled agents are a single LLM call wearing a costume. A real agent
-has to do four things a chatbot doesn't: **choose** its own actions,
-**observe** the results, **adapt** when something fails, and **know when
-to stop**.
+Unlike a simple single-prompt LLM workflow, this project implements an iterative research process:
 
-This project implements all four in a ReAct (Reason + Act) loop, and —
-more importantly — implements the *safety rails* around them in Python
-rather than politely asking the model to behave. An agent that polices
-itself only through its prompt will eventually not.
-
-## What Makes This an *Agent*
-
-Each turn, the model produces a structured `THOUGHT / ACTION / INPUT`
-reply. The loop parses it, executes the chosen tool, feeds the result
-back as an observation, and repeats:
-
-```
-Question → [THINK → ACT → OBSERVE] × N → SYNTHESIZE → cited report
+```text
+Research Question
+       ↓
+   Think → Act → Observe
+       ↓
+   Think → Act → Observe
+       ↓
+      ...
+       ↓
+   Synthesize
+       ↓
+ Cited Research Report
 ```
 
-The agent picks its own search queries, decides which URL is worth
-reading in full, routes around dead tools, and chooses when it has
-enough material. Nothing in that sequence is hardcoded.
+During a run, the agent can:
 
-## Three Guarantees Enforced in Python, Not in the Prompt
+* Generate its own search queries
+* Select pages to read
+* Process tool results as observations
+* Recover from tool failures
+* Detect repeated actions
+* Operate within a fixed step budget
+* Decide when enough information has been gathered
+* Produce citations based on retrieved sources
 
-**1. A hard step budget.**
-`max_steps` is a loop bound. The model can ask for a hundred more
-searches; it gets zero. This is the difference between an agent and an
-unbounded API bill. The remaining step count is also fed back to the
-model each turn so it can prioritize — but the cap holds regardless of
-whether it listens.
+---
 
-**2. A repeated-action guard.**
-If the model asks for a tool + input it has already run, the loop
-returns a nudge instead of burning a step re-fetching identical data.
-Looping on the same query is one of the most common real agent failure
-modes, and it's a control-flow problem, so it gets a control-flow fix.
+## What Makes This an Agent?
 
-**3. Tool failures are observations, not crashes.**
-A dead link or a failed search becomes text the agent can react to and
-route around. A run that has already gathered five good sources is not
-thrown away because the sixth fetch 404'd.
+The core workflow follows the ReAct pattern:
 
-Two smaller ones worth noting:
+1. **Think** — determine the next research action.
+2. **Act** — execute a registered tool.
+3. **Observe** — receive and process the tool result.
+4. **Repeat** — continue until the agent finishes or reaches its limits.
+5. **Synthesize** — generate the final cited report from gathered sources.
 
-- **Malformed replies are recoverable.** If the model ignores the output
-  format, the loop tells it the required format and continues, rather
-  than aborting a run mid-flight.
-- **No sources → no report.** If every tool call failed, the agent says
-  so plainly instead of inventing an answer from the model's training
-  data. That's the whole point of a *research* agent — the synthesis
-  call is skipped entirely rather than being allowed to hallucinate.
+```text
+Question
+   │
+   ▼
+┌─────────────┐
+│    Think    │
+└──────┬──────┘
+       ▼
+┌─────────────┐
+│     Act     │
+└──────┬──────┘
+       ▼
+┌─────────────┐
+│   Observe   │
+└──────┬──────┘
+       │
+       ├──────► Continue
+       │
+       ▼
+┌─────────────┐
+│  Synthesize │
+└──────┬──────┘
+       ▼
+  Cited Report
+```
+
+The sequence of searches and page reads is not hardcoded. The model determines the next action based on the current research state and observations.
+
+---
+
+## Safety & Control Mechanisms
+
+Important agent controls are enforced in Python rather than relying exclusively on model instructions.
+
+### 1. Hard Step Budget
+
+Every research run has a maximum number of steps.
+
+```python
+max_steps
+```
+
+The model cannot exceed this limit, even if it continues requesting additional actions.
+
+The remaining step count is also provided to the model so it can prioritize its remaining research actions.
+
+---
+
+### 2. Repeated-Action Guard
+
+The agent tracks previously executed tool actions.
+
+If the model requests the same tool with the same input again, the system detects the duplicate and returns an observation instead of unnecessarily repeating the operation.
+
+Example:
+
+```text
+Step 1:
+web_search("RAG approaches 2026")
+
+Step 3:
+web_search("RAG approaches 2026")
+
+→ Repeated action detected.
+```
+
+This prevents the agent from wasting execution steps repeatedly fetching identical information.
+
+---
+
+### 3. Tool Failure Recovery
+
+Tool failures are treated as observations instead of terminating the entire research process.
+
+For example:
+
+```text
+Tool failed:
+Page could not be retrieved.
+```
+
+The agent can then choose another action based on that observation.
+
+This allows a research run to continue even when an individual search or page retrieval fails.
+
+---
+
+### 4. Malformed Response Recovery
+
+The agent expects a structured response containing:
+
+```text
+THOUGHT
+ACTION
+INPUT
+```
+
+If the model produces an invalid response format, the system provides corrective feedback and continues the loop rather than immediately terminating the run.
+
+---
+
+### 5. No Sources → No Report
+
+The system does not synthesize a research report when no usable sources were successfully gathered.
+
+If all tool calls fail, the run reports that no sources were collected instead of generating a research answer from unsupported information.
+
+---
 
 ## Architecture
 
+```text
+                         ResearchService
+                              │
+                              ▼
+                       ┌───────────────┐
+                       │ ResearchAgent │
+                       └───────┬───────┘
+                               │
+                    ReAct Research Loop
+                 Think → Act → Observe
+                               │
+              ┌────────────────┴────────────────┐
+              │                                 │
+              ▼                                 ▼
+       ┌─────────────┐                  ┌───────────────┐
+       │ ToolRegistry│                  │ Claude Client │
+       └──────┬──────┘                  └───────────────┘
+              │
+       ┌──────┴──────────────┐
+       │                     │
+       ▼                     ▼
+┌───────────────┐    ┌────────────────┐
+│ Tavily Search │    │ Page Reader    │
+│     Tool      │    │     Tool       │
+└───────────────┘    └────────────────┘
+       │                     │
+       ▼                     ▼
+   Search API             HTML → Text
+
+              ┌───────────────────────┐
+              │  Citation Registry    │
+              │                       │
+              │ URL deduplication     │
+              │ Stable numbering      │
+              └───────────────────────┘
+
+                    User Interfaces
+                         │
+              ┌──────────┴──────────┐
+              ▼                     ▼
+        Streamlit UI             CLI
+          app.py                main.py
 ```
-                         ResearchService (facade)
-                                   |
-                            ResearchAgent
-              ReAct loop: think -> act -> observe -> repeat
-              + step budget + repeat guard + failure handling
-                    |                            |
-        +-----------+----------+          CitationRegistry
-        |                      |          dedupes by URL,
-   ToolRegistry          claude_client     stable numbering
-   dispatch by name      Anthropic API     across the run
-        |
-   +----+--------------------+
-   |                         |
-TavilySearchTool       PageReaderTool
-injected search_fn     injected fetch_fn
-(swappable provider)   (HTML -> text)
 
-   UI layer (either one, same service underneath):
-   +------------+   +------------+
-   |  app.py     |   |  main.py    |
-   |  Streamlit  |   |  Terminal   |
-   |  trace      |   |  CLI +      |
-   |  timeline   |   |  demo mode  |
-   +------------+   +------------+
-```
+### Main Components
 
-Both tools take their network backend as an **injected callable** rather
-than importing an HTTP client at module level. That's what makes the
-entire agent loop testable deterministically, and what makes the search
-provider swappable (Tavily, Brave, SerpAPI, a local index) without
-touching any agent logic.
+| Component          | Responsibility                                     |
+| ------------------ | -------------------------------------------------- |
+| `ResearchAgent`    | Runs the ReAct loop and execution controls         |
+| `ToolRegistry`     | Registers and dispatches tools                     |
+| `TavilySearchTool` | Performs web searches                              |
+| `PageReaderTool`   | Retrieves and converts pages to text               |
+| `CitationRegistry` | Deduplicates URLs and maintains citation numbering |
+| `Claude Client`    | Handles Anthropic API communication                |
+| `ResearchService`  | Provides the main research service interface       |
+| `app.py`           | Streamlit interface with agent execution timeline  |
+| `main.py`          | CLI interface and offline demo                     |
 
-## Environment Constraint — Stated Honestly
+---
 
-This sandbox's network allowlist does not include any web-search API
-host, so **the agent could not be run against a live search provider
-here.** What that means precisely:
+## Testable Tool Architecture
 
-- The full agent loop — tool selection, execution, observation,
-  repeat-detection, budget enforcement, citation collection, synthesis —
-  **was run end-to-end** and is verified by 76 tests plus a working
-  `demo` command (output below).
-- `TavilySearchTool` and `PageReaderTool` are wired for real use and
-  their HTTP backends are unit-tested with mocked transports, but no
-  live search was executed in this environment.
-- Running `python main.py research "..."` with `ANTHROPIC_API_KEY` and
-  `TAVILY_API_KEY` set, on a machine with outbound access, exercises the
-  same code path against real sources.
+The search and page-reading tools receive their network backend through injected callables rather than directly coupling the agent to a specific HTTP implementation.
 
-This is the same kind of documented trade-off as Day 42's local embedder
-and Day 43's missing PyTorch — a real constraint, named plainly, rather
-than a claim that something was verified when it wasn't.
+This provides two important benefits:
 
-## Folder Structure
+* The agent can be tested deterministically without live network requests.
+* The search provider can be replaced without changing the core agent logic.
 
-```
+The architecture can therefore support a different search backend while keeping the research loop independent from the provider implementation.
+
+---
+
+## Environment Constraint
+
+The development environment used for this project did not provide access to the required live web-search API host.
+
+Therefore:
+
+* The complete agent control flow was tested end-to-end.
+* The ReAct loop was tested with deterministic fake tools and a scripted model.
+* Step-budget enforcement was tested.
+* Repeated-action detection was tested.
+* Tool-failure handling was tested.
+* Citation collection was tested.
+* Report generation conditions were tested.
+* Tavily and page-reader HTTP behavior was tested using mocked transports.
+* A working offline `demo` command is included.
+
+Live web research was not executed in this environment.
+
+For live research, configure the required API keys on a machine with outbound network access.
+
+---
+
+## Project Structure
+
+```text
 day47-research-agent/
+│
 ├── src/
-│   ├── agent.py             # the ReAct loop + budget/repeat/failure guards
-│   ├── tools.py             # Tool protocol, search + page reader, registry
-│   ├── citations.py         # URL-deduplicated, stable source numbering
-│   ├── claude_client.py     # Anthropic API wrapper
-│   └── research_service.py  # facade
-├── tests/                   # 76 tests, 100% coverage
+│   ├── agent.py
+│   ├── tools.py
+│   ├── citations.py
+│   ├── claude_client.py
+│   └── research_service.py
+│
+├── tests/
 │   ├── test_agent.py
 │   ├── test_tools.py
 │   ├── test_citations.py
 │   └── test_research_service.py
-├── app.py                   # Streamlit agent-trace timeline UI
-├── main.py                  # CLI: `research` (live) and `demo` (offline)
+│
+├── app.py
+├── main.py
 ├── requirements.txt
 ├── pytest.ini
 ├── .gitignore
-├── GUIDE.txt                # Roman Urdu walkthrough
+├── GUIDE.txt
 └── README.md
 ```
 
+---
+
 ## Installation
+
+### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/<your-username>/autonomous-research-agent.git
 cd autonomous-research-agent
-python -m venv venv
-source venv/bin/activate      # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-
-export ANTHROPIC_API_KEY="sk-ant-..."   # required for live runs
-export TAVILY_API_KEY="tvly-..."        # required for live web search
 ```
+
+### 2. Create a Virtual Environment
+
+```bash
+python -m venv venv
+```
+
+### 3. Activate the Environment
+
+**Windows:**
+
+```bash
+venv\Scripts\activate
+```
+
+**Linux / macOS:**
+
+```bash
+source venv/bin/activate
+```
+
+### 4. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 5. Configure API Keys
+
+For live research, configure:
+
+```bash
+ANTHROPIC_API_KEY="your-anthropic-api-key"
+TAVILY_API_KEY="your-tavily-api-key"
+```
+
+---
 
 ## Usage
 
-**Offline demo — no keys, no network, runs the real agent loop:**
+### Offline Demo
+
+The project includes an offline demo that does not require API keys or network access.
+
 ```bash
 python main.py demo
 ```
 
-**Live research:**
+This executes the actual agent control flow using scripted model responses and fake tools.
+
+---
+
+### Live Research
+
+Run a research question with the live tools:
+
 ```bash
 python main.py research "What are the main approaches to RAG in 2026?"
-python main.py research "..." --max-steps 8 --output output/report.md
 ```
 
-**Streamlit UI:**
+Specify a custom step limit:
+
+```bash
+python main.py research "What are the main approaches to RAG in 2026?" --max-steps 8
+```
+
+Save the report:
+
+```bash
+python main.py research "What are the main approaches to RAG in 2026?" --max-steps 8 --output output/report.md
+```
+
+---
+
+## Streamlit Interface
+
+Launch the Streamlit application:
+
 ```bash
 streamlit run app.py
 ```
-The agent's every step renders as a timeline — which search it ran, which
-page it read, where a tool failed, why it stopped — with the cited report
-alongside. Hiding that behind a spinner would make the agent unauditable,
-which is exactly the fair criticism of most agent demos.
 
-## Real Demo Output
+The interface provides a visible research timeline showing the agent's execution process, including:
 
-Actual output from `python main.py demo` (scripted model + fake tools, so
-the control flow is deterministic and reproducible):
+* Search actions
+* Page-reading actions
+* Tool failures
+* Agent steps
+* Research progress
+* Final cited report
 
+The execution trace makes the agent's behavior observable instead of hiding the entire process behind a loading indicator.
+
+---
+
+## Demo Output
+
+The following is the deterministic output from:
+
+```bash
+python main.py demo
 ```
+
+```text
 ✓ Step 1: web_search [RAG approaches 2026]
    thought: I need an overview first.
    result:  1. RAG Survey 2026 — https://example.com/rag-survey
@@ -234,19 +422,34 @@ the control flow is deterministic and reproducible):
 STOPPED: finished  |  4 steps  |  2 sources
 ```
 
-Step 3 is the repeat guard doing its job — the agent tried to re-run an
-identical search and the loop refused to spend a step on it.
+The third step demonstrates the repeated-action guard preventing an identical search from being executed again.
+
+---
 
 ## Testing
 
+Run the test suite:
+
 ```bash
 pytest
+```
+
+Run tests with coverage:
+
+```bash
 pytest --cov=src --cov-report=term-missing
 ```
 
-**76 tests, 100% statement coverage on `src/`.**
+Current project results:
 
+```text
+76 tests passing
+100% statement coverage on src/
 ```
+
+### Coverage
+
+```text
 Name                      Stmts   Miss  Cover
 ------------------------------------------------------
 src/agent.py                105      0   100%
@@ -258,69 +461,57 @@ src/tools.py                102      0   100%
 TOTAL                       296      0   100%
 ```
 
-The agent tests are the interesting ones. A scripted fake client drives
-the loop down every branch deterministically: budget exhaustion with a
-model that never stops, an agent repeating itself, a search backend that
-throws, an unknown tool name, a reply that ignores the output format,
-and a run where every tool fails and the report must admit it gathered
-nothing. None of that needs an API key or network access.
+The tests cover important agent-control scenarios, including:
+
+* Step-budget exhaustion
+* Repeated actions
+* Search failures
+* Unknown tools
+* Malformed model responses
+* Citation handling
+* Successful research flows
+* Runs where no usable sources are collected
+
+---
 
 ## Deployment
 
-**Streamlit Community Cloud (recommended, free):**
-1. Push to GitHub, point [share.streamlit.io](https://share.streamlit.io) at `app.py`.
-2. Add both `ANTHROPIC_API_KEY` and `TAVILY_API_KEY` in Secrets.
-3. Consider lowering the default step budget — each step is an LLM call
-   plus a network fetch, and free-tier resources are modest.
+### Streamlit Community Cloud
 
-**Render / Hugging Face Spaces:** standard Streamlit deployment with the
-same two environment variables.
+The Streamlit application can be deployed using Streamlit Community Cloud.
+
+Deployment requirements:
+
+1. Push the project to GitHub.
+2. Select `app.py` as the application entry point.
+3. Configure:
+
+   * `ANTHROPIC_API_KEY`
+   * `TAVILY_API_KEY`
+4. Deploy the application.
+
+For constrained environments, the default step budget can be reduced because each research step may involve an LLM call and network operation.
+
+### Other Deployment Options
+
+The same Streamlit application can also be deployed using:
+
+* Render
+* Hugging Face Spaces
+
+---
 
 ## Version 2.0 Roadmap
 
-*(Documented as future work only — not implemented now, per project policy.)*
+The following items are planned future work and are **not currently implemented**.
 
-- Parallel tool execution — fan out several independent searches in one step instead of strictly serially
-- A reflection step: let the agent critique its own draft report and run targeted follow-up searches to fill the gaps it identifies
-- Source quality weighting — prefer primary sources, papers, and official docs over content-farm results
-- Persistent research memory across sessions, so a follow-up question reuses what was already gathered
-- Streaming the trace live into the UI as each step completes, rather than after the whole run
-- A cost meter showing tokens and API spend per run, since step budget is really a proxy for cost
+* Parallel tool execution
+* Fan-out searches for independent research queries
+* Additional research capabilities
 
-## GitHub Topics
+---
+---
 
-`python` `ai-agent` `react-agent` `agentic-ai` `claude-api` `anthropic` `llm` `tool-use` `streamlit` `web-research` `pytest` `citations`
+## License
 
-## Resume Bullet
-
-> Built an autonomous ReAct research agent that selects its own tools, reads web sources, and writes cited reports — with a hard step budget, repeated-action detection, and tool-failure recovery all enforced in application code rather than prompt instructions; achieved 100% test coverage across 76 tests by driving the full loop with a scripted fake LLM and injected tool backends, requiring no network or API keys.
-
-## Portfolio Description
-
-**Autonomous AI Research Agent** implements a genuine ReAct loop — the
-model chooses each action, observes the result, and decides when to stop
-— wrapped in safety rails that live in Python rather than in a prompt: a
-hard step budget the model cannot exceed, a repeated-action guard that
-catches the classic agent-looping failure, and tool-failure handling that
-turns a dead link into an observation instead of a crashed run. If every
-source fetch fails, it says so rather than hallucinating an answer.
-Built with injected tool backends so the entire loop is deterministically
-testable without network access, and paired with a trace-timeline UI that
-shows exactly what the agent did — because an agent you can't audit isn't
-one you should trust.
-
-## LinkedIn Post Draft
-
-> Day 47/60 of my AI Portfolio Challenge: an autonomous research agent — and the boring parts are the point. 🔎
->
-> The ReAct loop itself (think → act → observe → repeat) is maybe 40 lines. What actually makes it trustworthy is what surrounds it, and I put all of it in Python rather than in the prompt:
->
-> → A hard step budget. The model can ask for 50 more searches; it gets zero. That's the difference between an agent and an unbounded bill.
-> → A repeated-action guard. Agents love to re-run the same search forever. That's a control-flow bug, so it gets a control-flow fix.
-> → Tool failures become observations, not crashes. A 404 on source #6 doesn't throw away the five good ones.
-> → If every fetch fails, it reports that it found nothing — instead of quietly answering from training data. For a *research* agent, that one matters most.
->
-> 76 tests, 100% coverage, and the whole loop is driven by a scripted fake LLM with injected tool backends — so every failure branch is tested with no API key and no network.
->
-> #AgenticAI #AIEngineering #Python #LLM #ReAct
-# Autonomous-AI-Research-Agent
+This project is licensed under the MIT License.
