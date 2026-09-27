@@ -1,0 +1,5 @@
+anthropic>=0.40.0
+streamlit>=1.38.0
+requests>=2.31.0
+pytest>=8.0.0
+pytest-cov>=5.0.0
